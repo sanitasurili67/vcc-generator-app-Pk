@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}VCC Generator{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <a class="nav-brand" href="{{ url_for('index') }}"><i class="fas fa-credit-card"></i> VCC Gen By Shamshed</a>
+            <div class="nav-links">
+                {% if current_user.is_authenticated %}
+                    <a href="{{ url_for('account') }}"><i class="fas fa-user-cog"></i> My Account</a>
+                    <a href="https://t.me/ShamshedHaider" target="_blank" class="nav-button contact-admin-btn">
+                        <i class="fab fa-telegram-plane"></i> Contact Admin ভাই Shamshed
+                    </a>
+                    <a href="{{ url_for('logout') }}"><i class="fas fa-sign-out-alt"></i> Logout</a>
+                {% else %}
+                    <a href="{{ url_for('login') }}">Login</a>
+                    <a href="{{ url_for('register') }}">Register</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+    
+    <div class="main-content">
+        {% block content %}{% endblock %}
+    </div>
+
+    {% if current_user.is_authenticated and not current_user.is_approved %}
+    <div class="popup-overlay" id="approval-popup">
+        <div class="popup-box">
+            <h2>Account Pending Approval</h2>
+            <p>আপনার অ্যাকাউন্টটি এখনো অ্যাডমিন দ্বারা অনুমোদিত হয়নি। অনুগ্রহ করে আমাদের টেলিগ্রাম গ্রুপে জয়েন করে অ্যাডমিনের জন্য অপেক্ষা করুন।</p>
+            <a href="{{ telegram_link }}" target="_blank" class="btn telegram-btn">
+                <i class="fab fa-telegram-plane"></i> Join Telegram Group
+            </a>
+            <button class="btn" id="close-popup-btn">Close</button>
+        </div>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const popup = document.getElementById('approval-popup');
+            const closeBtn = document.getElementById('close-popup-btn');
+            const fiveMinutes = 5 * 60 * 1000; // ৫ মিনিট (মিলিসেকেন্ডে)
+
+            const lastClosed = localStorage.getItem('popupClosedTimestamp');
+
+            if (!lastClosed || (new Date().getTime() - lastClosed > fiveMinutes)) {
+                popup.style.display = 'flex';
+            }
+
+            closeBtn.addEventListener('click', function(){
+                localStorage.setItem('popupClosedTimestamp', new Date().getTime());
+                popup.style.display = 'none';
+            });
+        });
+    </script>
+    {% endif %}
+
+</body>
+</html>

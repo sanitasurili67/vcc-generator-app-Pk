@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body>
+    <div class="dashboard-container">
+        <header class="dashboard-header">
+            <h1>Admin Dashboard</h1>
+            <a href="/" class="btn-link">Create Card</a>
+        </header>
+
+        <main class="dashboard-grid">
+            <div class="panel">
+                <h3>Total Cards Generated</h3>
+                <p class="stat-number">{{ stats.total_cards }}</p>
+            </div>
+            <div class="panel">
+                <h3>Active Cards</h3>
+                <p class="stat-number">{{ stats.active_cards }}</p>
+            </div>
+            <div class="panel">
+                <h3>Total Spent</h3>
+                <p class="stat-number">${{ "%.2f"|format(stats.total_spent) }}</p>
+            </div>
+            <div class="panel">
+                <h3>Available Balance</h3>
+                <p class="stat-number">${{ "%.2f"|format(stats.available_balance) }}</p>
+            </div>
+            <div class="panel large-panel">
+                <h3>Recent Activity</h3>
+                <ul class="activity-list">
+                    <li>New card generated - VISA - $50</li>
+                    <li>Card #...4521 used for $15.75</li>
+                    <li>Card #...8901 used for $25.00</li>
+                    <li>New card generated - Mastercard - $100</li>
+                </ul>
+            </div>
+            <div class="panel">
+                <h3>System Status</h3>
+                <p class="status-ok">All Systems Operational</p>
+            </div>
+        </main>
+    </div>
+</body>
+</html>

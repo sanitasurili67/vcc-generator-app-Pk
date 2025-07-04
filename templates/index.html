@@ -1,0 +1,94 @@
+{% extends "layout.html" %}
+{% block title %}VCC Generator{% endblock %}
+{% block content %}
+    {% if current_user.is_authenticated and not current_user.is_approved %}
+    <div class="popup-overlay" id="popup-overlay" style="display: flex;">
+        <div class="popup-box">
+            <h2>Account Pending Approval</h2>
+            <p>আপনার অ্যাকাউন্টটি এখনো অ্যাডমিন দ্বারা অনুমোদিত হয়নি। অনুগ্রহ করে আমাদের টেলিগ্রাম গ্রুপে জয়েন করে অ্যাডমিনের জন্য অপেক্ষা করুন।</p>
+            <a href="{{ telegram_link }}" target="_blank" class="btn telegram-btn">
+                <i class="fab fa-telegram-plane"></i> Join Telegram Group
+            </a>
+            <button class="btn" id="close-popup-btn">Close</button>
+        </div>
+    </div>
+    <script>
+        document.getElementById('close-popup-btn').addEventListener('click', function(){
+            document.getElementById('popup-overlay').style.display = 'none';
+        });
+    </script>
+    {% endif %}
+
+    <div class="main-container">
+        <header class="main-header">
+            <i class="fas fa-credit-card"></i> Advanced VCC Generator
+        </header>
+
+        <div class="generator-body">
+            <div class="form-section">
+                 <form action="{{ url_for('index') }}" method="POST">
+                    <div class="form-group bin-group">
+                        <label for="bin">BIN (6-16 digits):</label>
+                        <div class="input-with-button">
+                            <input type="text" id="bin" name="bin" placeholder="e.g., 453590" pattern="\d{6,16}" value="{{ form_data.get('bin', '') }}">
+                            <button type="button" id="paste-btn" class="paste-btn">Paste</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Date Mode:</label>
+                        <div class="toggle-group">
+                            <input type="radio" id="date_random" name="date_mode" value="random" {% if not form_data.get('date_mode') or form_data.get('date_mode') == 'random' %}checked{% endif %}>
+                            <label for="date_random">Random</label>
+                            <input type="radio" id="date_custom" name="date_mode" value="custom" {% if form_data.get('date_mode') == 'custom' %}checked{% endif %}>
+                            <label for="date_custom">Custom</label>
+                        </div>
+                    </div>
+                    <div class="form-row" id="custom-date-fields">
+                        <div class="form-group">
+                            <label for="month">Month</label>
+                            <input type="number" id="month" name="month" placeholder="MM" min="1" max="12" value="{{ form_data.get('month', '') }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="year">Year</label>
+                            <input type="number" id="year" name="year" placeholder="YYYY" min="2025" max="2099" value="{{ form_data.get('year', '') }}">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="cvv">CVV</label>
+                        <input type="text" id="cvv" name="cvv" placeholder="Leave blank for random" value="{{ form_data.get('cvv', '') }}">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="quantity">Quantity</label>
+                            <input type="number" id="quantity" name="quantity" min="1" max="10000" value="{{ form_data.get('quantity', 10) }}">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn generate-btn">Generate</button>
+                </form>
+            </div>
+            <div class="output-section">
+                <div id="output-container">
+                    {% for card in card_list %}
+                    <div class="card-line">
+                        <span class="card-info">{{ card.number }}|{{ card.month }}|{{ card.year }}|{{ card.cvv }}</span>
+                        <button class="btn copy-single-btn">Copy</button>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="output-actions">
+                    <button type="button" class="btn" id="copy-all-btn">Copy All</button>
+                    <button type="button" class="btn" id="reset-btn">Reset</button>
+                </div>
+            </div>
+        </div>
+        
+        <footer class="main-footer">
+            <a href="https://t.me/ShamshedHaider" target="_blank" class="footer-link">
+                <i class="far fa-copyright"></i> Made by Shamshed
+            </a>
+        </footer>
+    </div>
+    <script>
+        document.getElementById('paste-btn').addEventListener('click',async function(){try{const t=await navigator.clipboard.readText();document.getElementById('bin').value=t}catch(t){console.error('Failed to read clipboard: ',t)}});document.querySelectorAll('.copy-single-btn').forEach(t=>{t.addEventListener('click',function(){const e=this.previousElementSibling.textContent;navigator.clipboard.writeText(e).then(()=>{t.textContent='Copied!';setTimeout(()=>{t.textContent='Copy'},1500)})})});document.getElementById('copy-all-btn').addEventListener('click',function(){const t=document.querySelectorAll('.card-info');if(0===t.length)return;let e=[];t.forEach(t=>{e.push(t.textContent)});const o=e.join('\n'),n=this;navigator.clipboard.writeText(o).then(()=>{n.textContent='All Copied!';setTimeout(()=>{n.textContent='Copy All'},1500)})});document.getElementById('reset-btn').addEventListener('click',function(){document.getElementById('output-container').innerHTML=''});const dateToggleRadios=document.querySelectorAll('input[name="date_mode"]'),customDateFields=document.getElementById('custom-date-fields');function toggleDateFields(){const t=document.getElementById('date_custom');customDateFields.style.display=t.checked?"flex":"none"}dateToggleRadios.forEach(t=>{t.addEventListener('change',toggleDateFields)});toggleDateFields();
+    </script>
+{% endblock %}
