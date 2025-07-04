@@ -1,38 +1,35 @@
-import os
-import datetime
-import json
-import random
-import threading
-import time
-import pytz
-import requests
 from flask import Flask, render_template, request, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+import datetime
+import requests
+import pytz
+import threading
+import time
+import json
+import random
 
-# App and Database Configuration
+# অ্যাপ এবং ডেটাবেস কনফিগারেশন
 app = Flask(__name__)
-# Render uses its own database URL, so we provide a fallback for local testing
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///users.db')
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a-very-secret-key-that-you-should-change')
+app.config['SECRET_KEY'] = 'a-very-secret-key-that-you-should-change'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
-# Telegram Bot Configuration using Environment Variables
-ADMIN_BOT_TOKEN = os.environ.get('7630074820:AAGFY7xSoDdHIb4GGLg6rKHRNCdVvlH6VVQ')
-ADMIN_CHAT_ID = os.environ.get('7078198425')
-BIN_NOTIFIER_BOT_TOKEN = os.environ.get('7907318035:AAECzx1IFvn880rUfG_4rYpM0K09kYzgLHQ')
-BIN_NOTIFIER_CHAT_ID = os.environ.get('7078198425')
-
+# টেলিগ্রাম বট কনফিগারেশন
+TELEGRAM_BOT_TOKEN = '7630074820:AAGFY7xSoDdHIb4GGLg6rKHRNCdVvlH6VVQ'
+ADMIN_CHAT_ID = '7078198425'
 TELEGRAM_GROUP_LINK = 'https://t.me/Autopay_SH'
-APPROVAL_SECRET_TOKEN = 'some-random-secret-string-for-approval' # This can also be an environment variable for more security
+APPROVAL_SECRET_TOKEN = 'some-random-secret-string-for-approval'
 LAST_UPDATE_ID = 0
+BIN_NOTIFIER_BOT_TOKEN = '7907318035:AAECzx1IFvn880rUfG_4rYpM0K09kYzgLHQ'
+BIN_NOTIFIER_CHAT_ID = '7078198425'
 
-# Database Model
+# ডেটাবেস মডেল
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -54,7 +51,8 @@ class User(UserMixin, db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# Card Generation Functions (Using your provided correct logic)
+
+# ===== আপনার দেওয়া নতুন এবং সঠিক ফর্মুলা এখানে যোগ করা হয়েছে =====
 def luhn_checksum(card_number):
     def digits_of(n): return [int(d) for d in str(n)]
     digits = digits_of(card_number)
@@ -67,13 +65,14 @@ def luhn_checksum(card_number):
 
 def generate_card_number(bin_prefix, length=16):
     num_to_generate = length - len(bin_prefix) - 1
+    # একটি ভ্যালিড কার্ড খুঁজে না পাওয়া পর্যন্ত লুপ চলবে
     while True:
         num = bin_prefix + ''.join([str(random.randint(0,9)) for _ in range(num_to_generate)])
         for d in range(10):
             card = num + str(d)
             if luhn_checksum(card) == 0:
                 return card
-    return None
+    return None # যদিও এটি হওয়ার কথা নয়
 
 def generate_card(bin_prefix, date_mode, month, year, cvv, quantity):
     generated_cards = []
@@ -83,18 +82,22 @@ def generate_card(bin_prefix, date_mode, month, year, cvv, quantity):
         if card_number:
             if date_mode == 'random':
                 exp_month = str(random.randint(1, 12)).zfill(2)
-                exp_year = str(random.randint(datetime.datetime.now().year + 1, datetime.datetime.now().year + 5))
+                # বছর বর্তমান বছরের চেয়ে ১ থেকে ৫ বছর বেশি হবে
+                exp_year_2_digit = str(random.randint(datetime.datetime.now().year % 100 + 1, datetime.datetime.now().year % 100 + 5))
             else:
                 exp_month = str(month).zfill(2) if month else str(random.randint(1, 12)).zfill(2)
-                exp_year = str(year)[-2:] if year else str(random.randint(datetime.datetime.now().year % 100 + 1, datetime.datetime.now().year % 100 + 5))
+                exp_year_2_digit = str(year)[-2:] if year else str(random.randint(datetime.datetime.now().year % 100 + 1, datetime.datetime.now().year % 100 + 5))
+            
             card_cvv = str(cvv) if cvv else str(random.randint(100, 999))
-            generated_cards.append({"number": card_number, "month": exp_month, "year": exp_year, "cvv": card_cvv})
+            generated_cards.append({"number": card_number, "month": exp_month, "year": exp_year_2_digit, "cvv": card_cvv})
     return generated_cards
+# ===== ফাংশন পরিবর্তন শেষ =====
 
-# Telegram Functions
+
+# টেলিগ্রাম ফাংশন
 def send_telegram_message(bot_token, chat_id, text, reply_markup=None):
     if not bot_token or not chat_id:
-        print("Telegram token or chat_id is missing.")
+        print(f"Telegram token or chat_id not set for a message.")
         return
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     params = {'chat_id': chat_id, 'text': text, 'parse_mode': 'Markdown'}
@@ -127,7 +130,7 @@ def send_renewal_request_to_telegram(user, duration):
     keyboard = {"inline_keyboard": [approval_buttons[:3], approval_buttons[3:]]}
     send_telegram_message(ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, message, keyboard)
 
-# Routes and other functions
+# রুট এবং অন্যান্য ফাংশন
 @app.route('/', methods=['GET', 'POST'])
 @login_required
 def index():
@@ -213,7 +216,6 @@ def approve_user():
         return f"User '{user_to_approve.username}' has been approved for {days} days!"
     else: return "User not found.", 404
 
-# Bot command handling
 def handle_bot_command(message):
     with app.app_context():
         command_text = message.get('text', ''); parts = command_text.split(); command = parts[0]
@@ -247,13 +249,13 @@ def handle_bot_command(message):
             else: send_telegram_message(ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, f"❌ User `{username}` not found.")
 
 def poll_telegram_bot():
-    global LAST_UPDATE_ID; print("Bot polling started...");
+    global LAST_UPDATE_ID
+    if not ADMIN_BOT_TOKEN:
+        print("Admin bot token not set. Polling paused.")
+        return
+    print("Bot polling started...")
     while True:
         try:
-            if not ADMIN_BOT_TOKEN:
-                print("Admin bot token not set. Polling paused.")
-                time.sleep(60)
-                continue
             url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/getUpdates"; params = {'offset': LAST_UPDATE_ID + 1, 'timeout': 30}; response = requests.get(url, params=params).json()
             if response.get('result'):
                 for update in response['result']:
@@ -263,24 +265,19 @@ def poll_telegram_bot():
         except Exception as e: print(f"Error in polling: {e}"); time.sleep(10)
 
 def set_bot_commands():
-    if not ADMIN_BOT_TOKEN: return
+    if not ADMIN_BOT_TOKEN:
+        return
     commands = [{"command": "list", "description": "List all registered users"}, {"command": "extend", "description": "/extend <user> <days>"}, {"command": "block", "description": "/block <user>"}, {"command": "unblock", "description": "/unblock <user>"}]
     url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/setMyCommands"
     try:
         response = requests.post(url, json={'commands': commands}); print("Bot commands set successfully" if response.ok else "Failed to set bot commands")
     except Exception as e: print(f"Error setting bot commands: {e}")
 
-# Create tables and start bot polling in the main thread if not using a separate worker
-with app.app_context():
-    db.create_all()
-    # Bot polling is better handled by a separate worker process in production
-    # For simplicity in this single file setup, we use a thread.
-    if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
-        polling_thread = threading.Thread(target=poll_telegram_bot, daemon=True)
-        polling_thread.start()
-        set_bot_commands()
-
 if __name__ == '__main__':
-    # This block is for local development only
-    app.run(debug=True, port=5001)
+    with app.app_context():
+        db.create_all()
+        set_bot_commands()
+    polling_thread = threading.Thread(target=poll_telegram_bot, daemon=True)
+    polling_thread.start()
+    app.run(debug=False, port=5001)
 
