@@ -1,7 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
-from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
-from werkzeug.security import generate_password_hash, check_password_hash
+import os
 import datetime
 import requests
 import pytz
@@ -9,25 +6,30 @@ import threading
 import time
 import json
 import random
+from flask import Flask, render_template, request, redirect, url_for, flash
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # অ্যাপ এবং ডেটাবেস কনফিগারেশন
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'a-very-secret-key-that-you-should-change'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+# Railway-তে SECRET_KEY এবং DATABASE_URL Environment Variable থেকে নেওয়া হবে
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a-default-secret-key-for-local-dev')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///users.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
-# টেলিগ্রাম বট কনফিগারেশন
-TELEGRAM_BOT_TOKEN = '7630074820:AAGFY7xSoDdHIb4GGLg6rKHRNCdVvlH6VVQ'
-ADMIN_CHAT_ID = '7078198425'
+# টেলিগ্রাম বট কনফিগারেশন (Environment Variable থেকে নেওয়া হবে)
+ADMIN_BOT_TOKEN = os.environ.get('7630074820:AAGFY7xSoDdHIb4GGLg6rKHRNCdVvlH6VVQ')
+ADMIN_CHAT_ID = os.environ.get('7078198425')
 TELEGRAM_GROUP_LINK = 'https://t.me/Autopay_SH'
-APPROVAL_SECRET_TOKEN = 'some-random-secret-string-for-approval'
+APPROVAL_SECRET_TOKEN = os.environ.get('APPROVAL_SECRET_TOKEN', 'local-secret')
 LAST_UPDATE_ID = 0
-BIN_NOTIFIER_BOT_TOKEN = '7907318035:AAECzx1IFvn880rUfG_4rYpM0K09kYzgLHQ'
-BIN_NOTIFIER_CHAT_ID = '7078198425'
+BIN_NOTIFIER_BOT_TOKEN = os.environ.get('7907318035:AAECzx1IFvn880rUfG_4rYpM0K09kYzgLHQ')
+BIN_NOTIFIER_CHAT_ID = os.environ.get('7078198425')
 
 # ডেটাবেস মডেল
 class User(UserMixin, db.Model):
@@ -43,7 +45,6 @@ class User(UserMixin, db.Model):
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
-
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
@@ -51,8 +52,7 @@ class User(UserMixin, db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-
-# ===== আপনার দেওয়া নতুন এবং সঠিক ফর্মুলা এখানে যোগ করা হয়েছে =====
+# কার্ড জেনারেট করার ফাংশন (আপনার দেওয়া সঠিক ফর্মুলা)
 def luhn_checksum(card_number):
     def digits_of(n): return [int(d) for d in str(n)]
     digits = digits_of(card_number)
@@ -65,14 +65,13 @@ def luhn_checksum(card_number):
 
 def generate_card_number(bin_prefix, length=16):
     num_to_generate = length - len(bin_prefix) - 1
-    # একটি ভ্যালিড কার্ড খুঁজে না পাওয়া পর্যন্ত লুপ চলবে
     while True:
         num = bin_prefix + ''.join([str(random.randint(0,9)) for _ in range(num_to_generate)])
         for d in range(10):
             card = num + str(d)
             if luhn_checksum(card) == 0:
                 return card
-    return None # যদিও এটি হওয়ার কথা নয়
+    return None
 
 def generate_card(bin_prefix, date_mode, month, year, cvv, quantity):
     generated_cards = []
@@ -82,17 +81,13 @@ def generate_card(bin_prefix, date_mode, month, year, cvv, quantity):
         if card_number:
             if date_mode == 'random':
                 exp_month = str(random.randint(1, 12)).zfill(2)
-                # বছর বর্তমান বছরের চেয়ে ১ থেকে ৫ বছর বেশি হবে
-                exp_year_2_digit = str(random.randint(datetime.datetime.now().year % 100 + 1, datetime.datetime.now().year % 100 + 5))
+                exp_year = str(random.randint(datetime.datetime.now().year % 100 + 1, datetime.datetime.now().year % 100 + 5))
             else:
                 exp_month = str(month).zfill(2) if month else str(random.randint(1, 12)).zfill(2)
-                exp_year_2_digit = str(year)[-2:] if year else str(random.randint(datetime.datetime.now().year % 100 + 1, datetime.datetime.now().year % 100 + 5))
-            
+                exp_year = str(year)[-2:] if year else str(random.randint(datetime.datetime.now().year % 100 + 1, datetime.datetime.now().year % 100 + 5))
             card_cvv = str(cvv) if cvv else str(random.randint(100, 999))
-            generated_cards.append({"number": card_number, "month": exp_month, "year": exp_year_2_digit, "cvv": card_cvv})
+            generated_cards.append({"number": card_number, "month": exp_month, "year": exp_year, "cvv": card_cvv})
     return generated_cards
-# ===== ফাংশন পরিবর্তন শেষ =====
-
 
 # টেলিগ্রাম ফাংশন
 def send_telegram_message(bot_token, chat_id, text, reply_markup=None):
@@ -276,8 +271,14 @@ def set_bot_commands():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-        set_bot_commands()
+    # অ্যাপ চালু হওয়ার সময় কমান্ড মেন্যু সেট করা হচ্ছে
+    # (এটি একটি আলাদা থ্রেডে চালানো ভালো, যাতে মূল অ্যাপ ব্লক না হয়)
+    command_thread = threading.Thread(target=set_bot_commands, daemon=True)
+    command_thread.start()
+    
     polling_thread = threading.Thread(target=poll_telegram_bot, daemon=True)
     polling_thread.start()
-    app.run(debug=False, port=5001)
+    
+    # Gunicorn এর জন্য এই লাইনটি প্রয়োজন নেই, কিন্তু লোকাল টেস্টিং এর জন্য রাখা হলো
+    # app.run(debug=False, port=5001)
 
