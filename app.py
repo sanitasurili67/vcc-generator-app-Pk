@@ -1,4 +1,7 @@
-import os
+from flask import Flask, render_template, request, redirect, url_for, flash
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
 import datetime
 import requests
 import pytz
@@ -6,30 +9,27 @@ import threading
 import time
 import json
 import random
-from flask import Flask, render_template, request, redirect, url_for, flash
-from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
-from werkzeug.security import generate_password_hash, check_password_hash
 
 # অ্যাপ এবং ডেটাবেস কনফিগারেশন
 app = Flask(__name__)
-# Railway-তে SECRET_KEY এবং DATABASE_URL Environment Variable থেকে নেওয়া হবে
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a-default-secret-key-for-local-dev')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///users.db')
+app.config['SECRET_KEY'] = 'a-very-secret-key-that-you-should-change'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
-# টেলিগ্রাম বট কনফিগারেশন (Environment Variable থেকে নেওয়া হবে)
-ADMIN_BOT_TOKEN = os.environ.get('7630074820:AAGFY7xSoDdHIb4GGLg6rKHRNCdVvlH6VVQ')
-ADMIN_CHAT_ID = os.environ.get('7078198425')
+# ===== প্রধান অ্যাডমিন বট কনফিগারেশন =====
+ADMIN_BOT_TOKEN = '7630074820:AAGFY7xSoDdHIb4GGLg6rKHRNCdVvlH6VVQ'  # Eikhane apnar main bot er token din
+ADMIN_CHAT_ID = '7078198425'            # Eikhane apnar main chat ID din
 TELEGRAM_GROUP_LINK = 'https://t.me/Autopay_SH'
-APPROVAL_SECRET_TOKEN = os.environ.get('APPROVAL_SECRET_TOKEN', 'local-secret')
+APPROVAL_SECRET_TOKEN = 'some-random-secret-string-for-approval'
 LAST_UPDATE_ID = 0
-BIN_NOTIFIER_BOT_TOKEN = os.environ.get('7907318035:AAECzx1IFvn880rUfG_4rYpM0K09kYzgLHQ')
-BIN_NOTIFIER_CHAT_ID = os.environ.get('7078198425')
+
+# ===== NEW: BIN নোটিফিকেশন পাঠানোর জন্য নতুন বট কনফিগারেশন =====
+BIN_NOTIFIER_BOT_TOKEN = '7907318035:AAECzx1IFvn880rUfG_4rYpM0K09kYzgLHQ' # Eikhane apnar *notun* bot er token din
+BIN_NOTIFIER_CHAT_ID = '7078198425'   # Eikhane je group/channel a BIN jabe tar ID din
 
 # ডেটাবেস মডেল
 class User(UserMixin, db.Model):
@@ -45,6 +45,7 @@ class User(UserMixin, db.Model):
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
+
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
@@ -52,7 +53,7 @@ class User(UserMixin, db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# কার্ড জেনারেট করার ফাংশন (আপনার দেওয়া সঠিক ফর্মুলা)
+# কার্ড জেনারেট করার ফাংশন
 def luhn_checksum(card_number):
     def digits_of(n): return [int(d) for d in str(n)]
     digits = digits_of(card_number)
@@ -81,7 +82,7 @@ def generate_card(bin_prefix, date_mode, month, year, cvv, quantity):
         if card_number:
             if date_mode == 'random':
                 exp_month = str(random.randint(1, 12)).zfill(2)
-                exp_year = str(random.randint(datetime.datetime.now().year % 100 + 1, datetime.datetime.now().year % 100 + 5))
+                exp_year = str(random.randint(datetime.datetime.now().year + 1, datetime.datetime.now().year + 5))
             else:
                 exp_month = str(month).zfill(2) if month else str(random.randint(1, 12)).zfill(2)
                 exp_year = str(year)[-2:] if year else str(random.randint(datetime.datetime.now().year % 100 + 1, datetime.datetime.now().year % 100 + 5))
@@ -90,40 +91,39 @@ def generate_card(bin_prefix, date_mode, month, year, cvv, quantity):
     return generated_cards
 
 # টেলিগ্রাম ফাংশন
-def send_telegram_message(bot_token, chat_id, text, reply_markup=None):
-    if not bot_token or not chat_id:
-        print(f"Telegram token or chat_id not set for a message.")
-        return
+def send_telegram_message(bot_token, chat_id, text):
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     params = {'chat_id': chat_id, 'text': text, 'parse_mode': 'Markdown'}
-    if reply_markup:
-        params['reply_markup'] = json.dumps(reply_markup)
     try:
         requests.get(url, params=params)
     except Exception as e:
         print(f"Failed to send telegram message: {e}")
 
 def send_approval_request_to_telegram(user):
-    message = (f"New user registration:\n\nUsername: `{user.username}`\nTelegram: `@{user.telegram_username}`\nRequested: *{user.requested_duration} days*\n\nPlease approve:")
-    approval_buttons = [{"text": f"Approve {d} Days", "url": url_for('approve_user', user_id=user.id, days=d, token=APPROVAL_SECRET_TOKEN, _external=True)} for d in [1, 3, 7, 15, 30]]
-    keyboard = {"inline_keyboard": [approval_buttons[:3], approval_buttons[3:]]}
-    send_telegram_message(ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, message, keyboard)
+    message = (f"New user registration:\n\nUsername: `{user.username}`\nEmail: `{user.email}`\nTelegram: `@{user.telegram_username}`\nRequested Duration: *{user.requested_duration} days*\n\nPlease approve for a specific duration:")
+    approval_buttons = [{"text": f"Approve {d} Days", "url": url_for('approve_user', user_id=user.id, days=d, token=APPROVAL_SECRET_TOKEN, _external=True)} for d in [1, 3, 7, 30]]
+    keyboard = {"inline_keyboard": [approval_buttons[:2], approval_buttons[2:]]}; params = {'chat_id': ADMIN_CHAT_ID, 'text': message, 'reply_markup': json.dumps(keyboard), 'parse_mode': 'Markdown'}
+    url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"; requests.get(url, params=params)
 
 def send_login_notification_to_telegram(user, ip_address):
     dhaka_tz = pytz.timezone("Asia/Dhaka"); login_time = datetime.datetime.now(dhaka_tz).strftime('%Y-%m-%d %I:%M:%S %p')
     message = (f"User Logged In\n\nUsername: `{user.username}`\nIP Address: `{ip_address}`\nTime: `{login_time}`")
     send_telegram_message(ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, message)
 
+# ===== NEW: BIN নোটিফিকেশন পাঠানোর নতুন ফাংশন =====
 def send_bin_to_telegram(user, used_bin, quantity):
-    dhaka_tz = pytz.timezone("Asia/Dhaka"); current_time = datetime.datetime.now(dhaka_tz).strftime('%Y-%m-%d %I:%M:%S %p')
-    message = (f"BIN Used\n\nUser: `{user.username}`\nBIN: `{used_bin}`\nQuantity: `{quantity}`\nTime: `{current_time}`")
+    dhaka_tz = pytz.timezone("Asia/Dhaka")
+    current_time = datetime.datetime.now(dhaka_tz).strftime('%Y-%m-%d %I:%M:%S %p')
+    
+    message = (
+        f"💳 BIN Used\n\n"
+        f"User: `{user.username}`\n"
+        f"BIN: `{used_bin}`\n"
+        f"Quantity: `{quantity}`\n"
+        f"Time: `{current_time}`"
+    )
+    # নতুন বট এবং চ্যাট আইডি ব্যবহার করা হচ্ছে
     send_telegram_message(BIN_NOTIFIER_BOT_TOKEN, BIN_NOTIFIER_CHAT_ID, message)
-
-def send_renewal_request_to_telegram(user, duration):
-    message = (f"Subscription Request\n\nUser: `{user.username}`\nTelegram: `@{user.telegram_username}`\nRequested Plan: *{duration} days*\n\nPlease approve to extend validity:")
-    approval_buttons = [{"text": f"Approve {d} Days", "url": url_for('approve_user', user_id=user.id, days=d, token=APPROVAL_SECRET_TOKEN, _external=True)} for d in [1, 3, 7, 15, 30]]
-    keyboard = {"inline_keyboard": [approval_buttons[:3], approval_buttons[3:]]}
-    send_telegram_message(ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, message, keyboard)
 
 # রুট এবং অন্যান্য ফাংশন
 @app.route('/', methods=['GET', 'POST'])
@@ -135,7 +135,10 @@ def index():
     if request.method == 'POST':
         bin_prefix = request.form.get('bin', '453590'); date_mode = request.form.get('date_mode', 'random'); month = request.form.get('month'); year = request.form.get('year'); cvv = request.form.get('cvv'); quantity = int(request.form.get('quantity', 10))
         if not bin_prefix: bin_prefix = '453590'
+        
+        # ===== NEW: BIN নোটিফিকেশন পাঠানোর ফাংশন কল করা হচ্ছে =====
         send_bin_to_telegram(current_user, bin_prefix, quantity)
+        
         card_list = generate_card(bin_prefix, date_mode, month, year, cvv, quantity)
     return render_template('index.html', card_list=card_list, form_data=request.form, telegram_link=TELEGRAM_GROUP_LINK)
 
@@ -150,12 +153,13 @@ def login():
             elif user.expiry_date and user.expiry_date < datetime.datetime.now(): flash('Your subscription has expired. Please contact admin.', 'danger')
             else: 
                 login_user(user)
-                ip_addr = request.headers.get('X-Forwarded-For', request.remote_addr)
+                ip_addr = request.remote_addr
                 send_login_notification_to_telegram(user, ip_addr)
                 return redirect(url_for('index'))
         else: flash('Invalid username or password.', 'danger')
     return render_template('login.html', telegram_link=TELEGRAM_GROUP_LINK)
 
+# (বাকি কোড আগের মতোই থাকবে)
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if current_user.is_authenticated: return redirect(url_for('index'))
@@ -168,7 +172,6 @@ def register():
             send_approval_request_to_telegram(new_user)
             flash('Registration successful! Please wait for admin approval.', 'success'); return redirect(url_for('login'))
     return render_template('register.html')
-
 @app.route('/account', methods=['GET', 'POST'])
 @login_required
 def account():
@@ -182,18 +185,11 @@ def account():
             new_email = request.form.get('new_email')
             if User.query.filter_by(email=new_email).first() and current_user.email != new_email: flash('Email address already in use.', 'danger')
             else: current_user.email = new_email; db.session.commit(); flash('Email updated successfully!', 'success')
-        elif action == 'request_subscription':
-            duration = request.form.get('duration')
-            if duration:
-                send_renewal_request_to_telegram(current_user, duration)
-                flash(f'Your request for a {duration}-day subscription has been sent to the admin.', 'success')
         return redirect(url_for('account'))
     return render_template('account.html')
-
 @app.route('/logout')
 @login_required
 def logout(): logout_user(); return redirect(url_for('login'))
-
 @app.route('/approve_user')
 def approve_user():
     user_id = request.args.get('user_id'); token = request.args.get('token'); days = request.args.get('days', type=int)
@@ -201,16 +197,10 @@ def approve_user():
     if not days: return "Duration not specified.", 400
     user_to_approve = User.query.get(user_id)
     if user_to_approve:
-        user_to_approve.is_approved = True
-        if user_to_approve.expiry_date and user_to_approve.expiry_date > datetime.datetime.now():
-            user_to_approve.expiry_date += datetime.timedelta(days=days)
-        else:
-            user_to_approve.expiry_date = datetime.datetime.now() + datetime.timedelta(days=days)
-        db.session.commit()
-        send_telegram_message(ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, f"User `{user_to_approve.username}` has been approved/extended with *{days} days* validity.")
+        user_to_approve.is_approved = True; user_to_approve.expiry_date = datetime.datetime.now() + datetime.timedelta(days=days); db.session.commit()
+        send_telegram_message(ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, f"User `{user_to_approve.username}` has been approved with *{days} days* validity.")
         return f"User '{user_to_approve.username}' has been approved for {days} days!"
     else: return "User not found.", 404
-
 def handle_bot_command(message):
     with app.app_context():
         command_text = message.get('text', ''); parts = command_text.split(); command = parts[0]
@@ -242,13 +232,8 @@ def handle_bot_command(message):
             username = parts[1]; user = User.query.filter_by(username=username).first()
             if user: user.is_blocked = False; db.session.commit(); send_telegram_message(ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, f"🟢 User `{username}` has been unblocked.")
             else: send_telegram_message(ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, f"❌ User `{username}` not found.")
-
 def poll_telegram_bot():
-    global LAST_UPDATE_ID
-    if not ADMIN_BOT_TOKEN:
-        print("Admin bot token not set. Polling paused.")
-        return
-    print("Bot polling started...")
+    global LAST_UPDATE_ID; print("Bot polling started...");
     while True:
         try:
             url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/getUpdates"; params = {'offset': LAST_UPDATE_ID + 1, 'timeout': 30}; response = requests.get(url, params=params).json()
@@ -258,27 +243,17 @@ def poll_telegram_bot():
                     if 'message' in update and 'text' in update['message']: handle_bot_command(update['message'])
             time.sleep(2)
         except Exception as e: print(f"Error in polling: {e}"); time.sleep(10)
-
 def set_bot_commands():
-    if not ADMIN_BOT_TOKEN:
-        return
     commands = [{"command": "list", "description": "List all registered users"}, {"command": "extend", "description": "/extend <user> <days>"}, {"command": "block", "description": "/block <user>"}, {"command": "unblock", "description": "/unblock <user>"}]
     url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/setMyCommands"
     try:
         response = requests.post(url, json={'commands': commands}); print("Bot commands set successfully" if response.ok else "Failed to set bot commands")
     except Exception as e: print(f"Error setting bot commands: {e}")
-
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    # অ্যাপ চালু হওয়ার সময় কমান্ড মেন্যু সেট করা হচ্ছে
-    # (এটি একটি আলাদা থ্রেডে চালানো ভালো, যাতে মূল অ্যাপ ব্লক না হয়)
-    command_thread = threading.Thread(target=set_bot_commands, daemon=True)
-    command_thread.start()
-    
+        set_bot_commands()
     polling_thread = threading.Thread(target=poll_telegram_bot, daemon=True)
     polling_thread.start()
-    
-    # Gunicorn এর জন্য এই লাইনটি প্রয়োজন নেই, কিন্তু লোকাল টেস্টিং এর জন্য রাখা হলো
-    # app.run(debug=False, port=5001)
+    app.run(debug=False, port=5001)
 
